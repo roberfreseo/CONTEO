@@ -8,19 +8,22 @@
 <style>
   body{font-family:Arial;margin:20px}
   .header{display:flex;align-items:center;gap:15px}
-  .logo{width:70px}
-  .meta{display:grid;grid-template-columns:repeat(7,1fr);gap:10px;margin-top:15px}
-  label{font-size:12px}
-  input,select{padding:6px;width:100%}
+  .logo{width:70px;height:auto}
+  .meta{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-top:15px}
+  label{font-size:12px;color:#333}
+  input,select{padding:7px;width:100%;box-sizing:border-box}
   button{padding:8px 12px;margin-top:10px;cursor:pointer}
-  table{width:100%;border-collapse:collapse;margin-top:20px}
+  table{width:100%;border-collapse:collapse;margin-top:18px}
   th,td{border:1px solid #ccc;padding:8px;text-align:right}
   th:first-child,td:first-child{text-align:left}
-  .section{background:#f6f6f6;font-weight:bold;text-align:left}
-  .totales{margin-top:15px;font-size:18px;line-height:1.4}
-  @media print{
-    button{display:none}
-  }
+  .section{background:#f6f6f6;font-weight:bold}
+  .totalrow{background:#fff7d6;font-weight:bold}
+  .panel{margin-top:16px;border:1px solid #ddd;border-radius:8px;padding:12px}
+  .panel h3{margin:0 0 10px 0;font-size:14px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  .ok{color:green;font-weight:bold}
+  .bad{color:#b00020;font-weight:bold}
+  @media print{ button{display:none} }
 </style>
 </head>
 
@@ -37,7 +40,7 @@
 <div class="meta">
   <div>
     <label>Negocio</label>
-    <input id="negocio">
+    <input id="negocio" placeholder="Ej. Lavandería">
   </div>
 
   <div>
@@ -60,22 +63,17 @@
 
   <div>
     <label>Fecha</label>
-    <input id="fecha" type="date" onchange="actualizarSemana(); calcular();">
+    <input id="fecha" type="date" onchange="actualizarSemana(); recalcular();">
   </div>
 
   <div>
     <label>Responsable</label>
-    <input id="responsable">
-  </div>
-
-  <div>
-    <label>Ingreso banco (€)</label>
-    <input id="banco" type="number" step="0.01" min="0" oninput="calcular()">
+    <input id="responsable" placeholder="Nombre">
   </div>
 </div>
 
 <div>
-  <button onclick="calcular()">Calcular</button>
+  <button onclick="recalcular()">Calcular</button>
   <button onclick="limpiar()">Limpiar</button>
   <button onclick="window.print()">Imprimir</button>
   <button onclick="window.print()">Guardar como PDF</button>
@@ -86,16 +84,65 @@
     <tr>
       <th>Denominación</th>
       <th>Cantidad</th>
-      <th>Subtotal</th>
+      <th>Subtotal (€)</th>
     </tr>
   </thead>
   <tbody id="tabla"></tbody>
 </table>
 
-<div class="totales">
-  Total contado: <span id="total">0.00</span> €<br>
-  Ingreso banco: <span id="tbanco">0.00</span> €<br>
-  Diferencia: <span id="dif">0.00</span> €
+<div class="panel">
+  <h3>Resumen</h3>
+  <div class="grid3">
+    <div>
+      <label>Total Monedas (€)</label>
+      <input id="outTotalMonedas" readonly>
+    </div>
+    <div>
+      <label>Total Billetes (€)</label>
+      <input id="outTotalBilletes" readonly>
+    </div>
+    <div>
+      <label>Total Contado (€)</label>
+      <input id="outTotalContado" readonly>
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <h3>Caja de cambio (fijo 900 €)</h3>
+  <div class="grid3">
+    <div>
+      <label>Caja de cambio contada (€)</label>
+      <input id="cajaCambioContada" type="number" step="0.01" min="0" value="0" oninput="recalcular()">
+    </div>
+    <div>
+      <label>Objetivo fijo (€)</label>
+      <input id="cajaCambioFijo" readonly value="900.00">
+    </div>
+    <div>
+      <label>900 − contada (faltante/sobrante) (€)</label>
+      <input id="outCajaCambioDiff" readonly>
+    </div>
+  </div>
+  <div id="estadoCajaCambio" style="margin-top:8px;"></div>
+</div>
+
+<div class="panel">
+  <h3>Ingreso a banco</h3>
+  <div class="grid3">
+    <div>
+      <label>Ingreso sugerido (70% de monedas) (€)</label>
+      <input id="outIngresoSugerido" readonly>
+    </div>
+    <div>
+      <label>Ingreso real en banco (€) (opcional)</label>
+      <input id="ingresoReal" type="number" step="0.01" min="0" placeholder="Si quieres registrar el real" oninput="recalcular()">
+    </div>
+    <div>
+      <label>Diferencia (sugerido − real) (€)</label>
+      <input id="outDiffIngreso" readonly>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -104,7 +151,7 @@
     Curros:  ["Lavadora 1","Lavadora 2","Lavadora 3","Lavadora 4","Secadora 1","Secadora 2","Secadora 3"]
   };
 
-  // Separadas para poder ordenarlas con encabezados
+  // Solo monedas que usas
   const monedas = [
     { n:"Moneda 0,20€", v:0.20 },
     { n:"Moneda 0,50€", v:0.50 },
@@ -112,35 +159,34 @@
     { n:"Moneda 2€",    v:2.00 }
   ];
 
+  // Billetes que usas
   const billetes = [
     { n:"Billete 5€",  v:5.00 },
     { n:"Billete 10€", v:10.00 },
     { n:"Billete 20€", v:20.00 }
   ];
 
-  // Lista "plana" para cálculos (se rellena al renderizar)
-  let denominaciones = [];
+  let idxMonedas = [];
+  let idxBilletes = [];
+  let items = []; // lista plana para inputs
 
   function actualizarMaquinas(){
     const local = document.getElementById("local").value;
     const sel = document.getElementById("maquina");
     sel.innerHTML = "";
     maquinas[local].forEach(m=>{
-      const o=document.createElement("option");
-      o.textContent=m;
+      const o = document.createElement("option");
+      o.textContent = m;
       sel.appendChild(o);
     });
   }
 
-  // ---- Semana ISO (1-53) + año ISO ----
+  // Semana ISO
   function getISOWeekYear(date){
-    // Copia fecha en UTC para evitar líos de huso
     const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-    // Jueves de la semana actual decide el año ISO
-    const dayNum = d.getUTCDay() || 7; // 1..7 (lunes..domingo)
+    const dayNum = d.getUTCDay() || 7;
     d.setUTCDate(d.getUTCDate() + 4 - dayNum);
     const isoYear = d.getUTCFullYear();
-    // Semana 1: semana que contiene el 4 de enero
     const yearStart = new Date(Date.UTC(isoYear,0,1));
     const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
     return { week: weekNo, year: isoYear };
@@ -151,76 +197,142 @@
     if(!f) return;
     const date = new Date(f + "T00:00:00");
     const { week, year } = getISOWeekYear(date);
-    const ww = String(week).padStart(2,"0");
-    document.getElementById("semana").value = `SEM-${ww}-${year}`;
+    document.getElementById("semana").value = `SEM-${String(week).padStart(2,"0")}-${year}`;
   }
 
   function crearTabla(){
     const t = document.getElementById("tabla");
     t.innerHTML = "";
-    denominaciones = [];
+    items = [];
+    idxMonedas = [];
+    idxBilletes = [];
 
     // Sección Monedas
-    let trSec1 = document.createElement("tr");
-    trSec1.innerHTML = `<td class="section" colspan="3">MONEDAS</td>`;
-    t.appendChild(trSec1);
+    let trM = document.createElement("tr");
+    trM.innerHTML = `<td class="section" colspan="3">MONEDAS</td>`;
+    t.appendChild(trM);
 
-    monedas.forEach((m, idx) => {
-      const i = denominaciones.length;
-      denominaciones.push(m);
+    monedas.forEach(m=>{
+      const i = items.length;
+      items.push(m);
+      idxMonedas.push(i);
+
       const tr = document.createElement("tr");
       tr.innerHTML = `
         <td>${m.n}</td>
-        <td><input type="number" min="0" step="1" id="c${i}" value="0" oninput="calcular()"></td>
+        <td><input type="number" min="0" step="1" id="c${i}" value="0" oninput="recalcular()"></td>
         <td id="s${i}">0.00</td>`;
       t.appendChild(tr);
     });
+
+    // TOTAL MONEDAS
+    let trTM = document.createElement("tr");
+    trTM.className = "totalrow";
+    trTM.innerHTML = `<td colspan="2">TOTAL MONEDAS</td><td id="rowTotalMonedas">0.00</td>`;
+    t.appendChild(trTM);
 
     // Sección Billetes
-    let trSec2 = document.createElement("tr");
-    trSec2.innerHTML = `<td class="section" colspan="3">BILLETES</td>`;
-    t.appendChild(trSec2);
+    let trB = document.createElement("tr");
+    trB.innerHTML = `<td class="section" colspan="3">BILLETES</td>`;
+    t.appendChild(trB);
 
-    billetes.forEach((m, idx) => {
-      const i = denominaciones.length;
-      denominaciones.push(m);
+    billetes.forEach(m=>{
+      const i = items.length;
+      items.push(m);
+      idxBilletes.push(i);
+
       const tr = document.createElement("tr");
       tr.innerHTML = `
         <td>${m.n}</td>
-        <td><input type="number" min="0" step="1" id="c${i}" value="0" oninput="calcular()"></td>
+        <td><input type="number" min="0" step="1" id="c${i}" value="0" oninput="recalcular()"></td>
         <td id="s${i}">0.00</td>`;
       t.appendChild(tr);
     });
+
+    // TOTAL BILLETES
+    let trTB = document.createElement("tr");
+    trTB.className = "totalrow";
+    trTB.innerHTML = `<td colspan="2">TOTAL BILLETES</td><td id="rowTotalBilletes">0.00</td>`;
+    t.appendChild(trTB);
+
+    // TOTAL CONTADO
+    let trTT = document.createElement("tr");
+    trTT.className = "totalrow";
+    trTT.innerHTML = `<td colspan="2">TOTAL CONTADO</td><td id="rowTotalContado">0.00</td>`;
+    t.appendChild(trTT);
   }
 
-  function calcular(){
+  function to2(n){ return (Math.round(n*100)/100).toFixed(2); }
+
+  function recalcular(){
     let total = 0;
-    denominaciones.forEach((m,i)=>{
-      const c = parseInt(document.getElementById("c"+i).value || 0, 10);
+    let totalMonedas = 0;
+    let totalBilletes = 0;
+
+    items.forEach((m,i)=>{
+      const c = parseInt(document.getElementById("c"+i).value || "0", 10);
       const s = c * m.v;
-      document.getElementById("s"+i).textContent = s.toFixed(2);
+      document.getElementById("s"+i).textContent = to2(s);
       total += s;
     });
 
-    const banco = parseFloat(document.getElementById("banco").value || 0);
+    idxMonedas.forEach(i=>{
+      const c = parseInt(document.getElementById("c"+i).value || "0", 10);
+      totalMonedas += c * items[i].v;
+    });
 
-    document.getElementById("total").textContent = total.toFixed(2);
-    document.getElementById("tbanco").textContent = banco.toFixed(2);
-    document.getElementById("dif").textContent = (total - banco).toFixed(2);
+    idxBilletes.forEach(i=>{
+      const c = parseInt(document.getElementById("c"+i).value || "0", 10);
+      totalBilletes += c * items[i].v;
+    });
+
+    // Filas totales en tabla
+    document.getElementById("rowTotalMonedas").textContent = to2(totalMonedas);
+    document.getElementById("rowTotalBilletes").textContent = to2(totalBilletes);
+    document.getElementById("rowTotalContado").textContent = to2(total);
+
+    // Resumen
+    document.getElementById("outTotalMonedas").value = to2(totalMonedas);
+    document.getElementById("outTotalBilletes").value = to2(totalBilletes);
+    document.getElementById("outTotalContado").value = to2(total);
+
+    // Caja de cambio: 900 - contada
+    const fijo = 900.00;
+    const contada = parseFloat(document.getElementById("cajaCambioContada").value || "0");
+    const diffCambio = fijo - contada;
+    document.getElementById("outCajaCambioDiff").value = to2(diffCambio);
+
+    const estado = document.getElementById("estadoCajaCambio");
+    if (Math.abs(diffCambio) < 0.005){
+      estado.innerHTML = `<span class="ok">OK: Caja de cambio en 900,00 €</span>`;
+    } else if (diffCambio > 0) {
+      estado.innerHTML = `<span class="bad">FALTA en caja de cambio: ${to2(diffCambio)} €</span>`;
+    } else {
+      estado.innerHTML = `<span class="bad">SOBRA en caja de cambio: ${to2(Math.abs(diffCambio))} €</span>`;
+    }
+
+    // Ingreso sugerido: 70% de monedas
+    const ingresoSugerido = totalMonedas * 0.70;
+    document.getElementById("outIngresoSugerido").value = to2(ingresoSugerido);
+
+    // Diferencia sugerido vs real (si metes real)
+    const real = parseFloat(document.getElementById("ingresoReal").value || "0");
+    const diffIng = ingresoSugerido - real;
+    document.getElementById("outDiffIngreso").value = to2(diffIng);
   }
 
   function limpiar(){
-    denominaciones.forEach((_,i)=>{
+    items.forEach((_,i)=>{
       document.getElementById("c"+i).value = 0;
       document.getElementById("s"+i).textContent = "0.00";
     });
-    document.getElementById("banco").value = "";
-    calcular();
+    document.getElementById("cajaCambioContada").value = 0;
+    document.getElementById("ingresoReal").value = "";
+    recalcular();
   }
 
-  // INIT
   (function init(){
-    // Set fecha a hoy en formato YYYY-MM-DD
+    // Fecha hoy
     const today = new Date();
     const yyyy = today.getFullYear();
     const mm = String(today.getMonth()+1).padStart(2,"0");
@@ -230,7 +342,7 @@
     actualizarSemana();
     actualizarMaquinas();
     crearTabla();
-    calcular();
+    recalcular();
   })();
 </script>
 

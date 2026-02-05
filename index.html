@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Conteo de Caja</title>
+
+<style>
+  body{font-family:Arial;margin:20px}
+  .header{display:flex;align-items:center;gap:15px}
+  .logo{width:70px}
+  .meta{display:grid;grid-template-columns:repeat(7,1fr);gap:10px;margin-top:15px}
+  label{font-size:12px}
+  input,select{padding:6px;width:100%}
+  button{padding:8px 12px;margin-top:10px;cursor:pointer}
+  table{width:100%;border-collapse:collapse;margin-top:20px}
+  th,td{border:1px solid #ccc;padding:8px;text-align:right}
+  th:first-child,td:first-child{text-align:left}
+  .section{background:#f6f6f6;font-weight:bold;text-align:left}
+  .totales{margin-top:15px;font-size:18px;line-height:1.4}
+  @media print{
+    button{display:none}
+  }
+</style>
+</head>
+
+<body>
+
+<div class="header">
+  <img src="logo.png" class="logo" onerror="this.style.display='none'">
+  <div>
+    <h2 style="margin:0">Conteo de Caja</h2>
+    <div style="font-size:12px;color:#555">Monedas y billetes · Imprimir o Guardar como PDF</div>
+  </div>
+</div>
+
+<div class="meta">
+  <div>
+    <label>Negocio</label>
+    <input id="negocio">
+  </div>
+
+  <div>
+    <label>Local</label>
+    <select id="local" onchange="actualizarMaquinas()">
+      <option>Monelos</option>
+      <option>Curros</option>
+    </select>
+  </div>
+
+  <div>
+    <label>Máquina</label>
+    <select id="maquina"></select>
+  </div>
+
+  <div>
+    <label>Semana Nº (auto)</label>
+    <input id="semana" readonly>
+  </div>
+
+  <div>
+    <label>Fecha</label>
+    <input id="fecha" type="date" onchange="actualizarSemana(); calcular();">
+  </div>
+
+  <div>
+    <label>Responsable</label>
+    <input id="responsable">
+  </div>
+
+  <div>
+    <label>Ingreso banco (€)</label>
+    <input id="banco" type="number" step="0.01" min="0" oninput="calcular()">
+  </div>
+</div>
+
+<div>
+  <button onclick="calcular()">Calcular</button>
+  <button onclick="limpiar()">Limpiar</button>
+  <button onclick="window.print()">Imprimir</button>
+  <button onclick="window.print()">Guardar como PDF</button>
+</div>
+
+<table>
+  <thead>
+    <tr>
+      <th>Denominación</th>
+      <th>Cantidad</th>
+      <th>Subtotal</th>
+    </tr>
+  </thead>
+  <tbody id="tabla"></tbody>
+</table>
+
+<div class="totales">
+  Total contado: <span id="total">0.00</span> €<br>
+  Ingreso banco: <span id="tbanco">0.00</span> €<br>
+  Diferencia: <span id="dif">0.00</span> €
+</div>
+
+<script>
+  const maquinas = {
+    Monelos: ["Lavadora 1","Lavadora 2","Lavadora 3","Secadora 1","Secadora 2","Secadora 3"],
+    Curros:  ["Lavadora 1","Lavadora 2","Lavadora 3","Lavadora 4","Secadora 1","Secadora 2","Secadora 3"]
+  };
+
+  // Separadas para poder ordenarlas con encabezados
+  const monedas = [
+    { n:"Moneda 0,20€", v:0.20 },
+    { n:"Moneda 0,50€", v:0.50 },
+    { n:"Moneda 1€",    v:1.00 },
+    { n:"Moneda 2€",    v:2.00 }
+  ];
+
+  const billetes = [
+    { n:"Billete 5€",  v:5.00 },
+    { n:"Billete 10€", v:10.00 },
+    { n:"Billete 20€", v:20.00 }
+  ];
+
+  // Lista "plana" para cálculos (se rellena al renderizar)
+  let denominaciones = [];
+
+  function actualizarMaquinas(){
+    const local = document.getElementById("local").value;
+    const sel = document.getElementById("maquina");
+    sel.innerHTML = "";
+    maquinas[local].forEach(m=>{
+      const o=document.createElement("option");
+      o.textContent=m;
+      sel.appendChild(o);
+    });
+  }
+
+  // ---- Semana ISO (1-53) + año ISO ----
+  function getISOWeekYear(date){
+    // Copia fecha en UTC para evitar líos de huso
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    // Jueves de la semana actual decide el año ISO
+    const dayNum = d.getUTCDay() || 7; // 1..7 (lunes..domingo)
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const isoYear = d.getUTCFullYear();
+    // Semana 1: semana que contiene el 4 de enero
+    const yearStart = new Date(Date.UTC(isoYear,0,1));
+    const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+    return { week: weekNo, year: isoYear };
+  }
+
+  function actualizarSemana(){
+    const f = document.getElementById("fecha").value;
+    if(!f) return;
+    const date = new Date(f + "T00:00:00");
+    const { week, year } = getISOWeekYear(date);
+    const ww = String(week).padStart(2,"0");
+    document.getElementById("semana").value = `SEM-${ww}-${year}`;
+  }
+
+  function crearTabla(){
+    const t = document.getElementById("tabla");
+    t.innerHTML = "";
+    denominaciones = [];
+
+    // Sección Monedas
+    let trSec1 = document.createElement("tr");
+    trSec1.innerHTML = `<td class="section" colspan="3">MONEDAS</td>`;
+    t.appendChild(trSec1);
+
+    monedas.forEach((m, idx) => {
+      const i = denominaciones.length;
+      denominaciones.push(m);
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${m.n}</td>
+        <td><input type="number" min="0" step="1" id="c${i}" value="0" oninput="calcular()"></td>
+        <td id="s${i}">0.00</td>`;
+      t.appendChild(tr);
+    });
+
+    // Sección Billetes
+    let trSec2 = document.createElement("tr");
+    trSec2.innerHTML = `<td class="section" colspan="3">BILLETES</td>`;
+    t.appendChild(trSec2);
+
+    billetes.forEach((m, idx) => {
+      const i = denominaciones.length;
+      denominaciones.push(m);
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${m.n}</td>
+        <td><input type="number" min="0" step="1" id="c${i}" value="0" oninput="calcular()"></td>
+        <td id="s${i}">0.00</td>`;
+      t.appendChild(tr);
+    });
+  }
+
+  function calcular(){
+    let total = 0;
+    denominaciones.forEach((m,i)=>{
+      const c = parseInt(document.getElementById("c"+i).value || 0, 10);
+      const s = c * m.v;
+      document.getElementById("s"+i).textContent = s.toFixed(2);
+      total += s;
+    });
+
+    const banco = parseFloat(document.getElementById("banco").value || 0);
+
+    document.getElementById("total").textContent = total.toFixed(2);
+    document.getElementById("tbanco").textContent = banco.toFixed(2);
+    document.getElementById("dif").textContent = (total - banco).toFixed(2);
+  }
+
+  function limpiar(){
+    denominaciones.forEach((_,i)=>{
+      document.getElementById("c"+i).value = 0;
+      document.getElementById("s"+i).textContent = "0.00";
+    });
+    document.getElementById("banco").value = "";
+    calcular();
+  }
+
+  // INIT
+  (function init(){
+    // Set fecha a hoy en formato YYYY-MM-DD
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth()+1).padStart(2,"0");
+    const dd = String(today.getDate()).padStart(2,"0");
+    document.getElementById("fecha").value = `${yyyy}-${mm}-${dd}`;
+
+    actualizarSemana();
+    actualizarMaquinas();
+    crearTabla();
+    calcular();
+  })();
+</script>
+
+</body>
+</html>
